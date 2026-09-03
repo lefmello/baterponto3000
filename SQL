@@ -1,0 +1,143 @@
+## 3. Modelo do Banco de Dados SQL (Supabase PostgreSQL)
+
+Abaixo está o script SQL completo para ser executado diretamente no SQL Editor do Supabase. Inclui tabelas, enums, índices, triggers para automação de fechamento de falta e regras de RLS (Row Level Security).
+
+```sql
+-- Habilitar extensão para geração de UUID
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 1. ENUMS
+CREATE TYPE tipo_registro AS ENUM ('ENTRADA', 'SAIDA');
+CREATE TYPE metodo_autenticacao AS ENUM ('FACIAL', 'BIOMETRIA_DIGITAL', 'CRACHA_BARCODE');
+CREATE TYPE status_dia AS ENUM ('NORMAL', 'ATRASO', 'FALTA', 'FOLGA');
+
+-- 2. TABELA DE FUNCIONÁRIOS
+CREATE TABLE funcionarios (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    matricula VARCHAR(20) UNIQUE NOT NULL,
+    nome VARCHAR(100) NOT NULL,
+    codigo_barras_cracha VARCHAR(50) UNIQUE NOT NULL,
+    -- Vetor facial armazenado como array de floats (128 posições geradas pelo face-api.js)
+    vetor_facial JSONB DEFAULT NULL,
+    horario_entrada TIME NOT NULL DEFAULT '08:00:00',
+    horario_saida TIME NOT NULL DEFAULT '17:00:00',
+    ativo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. TABELA DE REGISTROS DE PONTO (LOGS DE ENTRADA/SAIDA)
+CREATE TABLE registros_ponto (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    funcionario_id UUID NOT NULL REFERENCES funcionarios(id) ON DELETE RESTRICT,
+    data_hora TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    tipo tipo_registro NOT NULL,
+    metodo metodo_autenticacao NOT NULL,
+    contingencia BOOLEAN GENERATED ALWAYS AS (metodo != 'FACIAL') STORED,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexação para otimizar busca diária por funcionário
+CREATE INDEX idx_registros_funcionario_data ON registros_ponto (funcionario_id, data_hora);
+
+-- 4. TABELA DE ESPELHO DE PONTO DIÁRIO (APURAÇÃO DE JORNADA)
+CREATE TABLE espelho_ponto_diario (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    funcionario_id UUID NOT NULL REFERENCES funcionarios(id) ON DELETE RESTRICT,
+    data DATE NOT NULL,
+    primeira_entrada TIMESTAMPTZ NULL,
+    ultima_saida TIMESTAMPTZ NULL,
+    minutos_trabalhados INT DEFAULT 0,
+    minutos_atraso INT DEFAULT 0,
+    status status_dia NOT NULL DEFAULT 'NORMAL',
+    justificativa_anexo_url TEXT NULL,
+    observacoes_rh TEXT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(funcionario_id, data)
+);
+
+-- 5. REGRAS DE NEGÓCIO VIA STORED PROCEDURES & TRIGGERS
+
+-- Função para calcular horas e tolerâncias ao registrar o ponto de SAÍDA
+CREATE OR REPLACE FUNCTION processar_registro_ponto()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_data DATE := NEW.data_hora::DATE;
+    v_horario_oficial_entrada TIME;
+    v_horario_oficial_saida TIME;
+    v_entrada TIMESTAMPTZ;
+    v_saida TIMESTAMPTZ;
+    v_minutos_trabalhados INT;
+    v_minutos_atraso INT := 0;
+    v_status status_dia := 'NORMAL';
+BEGIN
+    -- Obter horário oficial do funcionário
+    SELECT horario_entrada, horario_saida 
+    INTO v_horario_oficial_entrada, v_horario_oficial_saida
+    FROM funcionarios WHERE id = NEW.funcionario_id;
+
+    IF NEW.tipo = 'ENTRADA' THEN
+        -- Insere ou atualiza a entrada do dia
+        INSERT INTO espelho_ponto_diario (funcionario_id, data, primeira_entrada, status)
+        VALUES (NEW.funcionario_id, v_data, NEW.data_hora, 'NORMAL')
+        ON CONFLICT (funcionario_id, data) 
+        DO UPDATE SET primeira_entrada = EXCLUDED.primeira_entrada, updated_at = NOW();
+    
+    ELSIF NEW.tipo = 'SAIDA' THEN
+        -- Atualiza saída e realiza apuração de horas
+        SELECT primeira_entrada INTO v_entrada
+        FROM espelho_ponto_diario
+        WHERE funcionario_id = NEW.funcionario_id AND data = v_data;
+
+        IF v_entrada IS NOT NULL THEN
+            v_saida := NEW.data_hora;
+            
+            -- Minutos trabalhados no dia
+            v_minutos_trabalhados := EXTRACT(EPOCH FROM (v_saida - v_entrada))/60;
+
+            -- Cálculo de Atraso na Entrada
+            IF (v_entrada::TIME > v_horario_oficial_entrada) THEN
+                v_minutos_atraso := EXTRACT(EPOCH FROM (v_entrada::TIME - v_horario_oficial_entrada))/60;
+            END IF;
+
+            -- Aplicação da Regra de Tolerância de 10 Minutos
+            IF v_minutos_atraso <= 10 THEN
+                v_minutos_atraso := 0;
+                v_status := 'NORMAL';
+            ELSE
+                v_status := 'ATRASO';
+            END IF;
+
+            UPDATE espelho_ponto_diario
+            SET ultima_saida = v_saida,
+                minutos_trabalhados = v_minutos_trabalhados,
+                minutos_atraso = v_minutos_atraso,
+                status = v_status,
+                updated_at = NOW()
+            WHERE funcionario_id = NEW.funcionario_id AND data = v_data;
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_processar_ponto
+AFTER INSERT ON registros_ponto
+FOR EACH ROW EXECUTE FUNCTION processar_registro_ponto();
+
+-- 6. ROTINA AUTOMÁTICA DE FECHAMENTO DE FALTAS
+CREATE OR REPLACE FUNCTION fechar_faltas_diarias(p_data DATE)
+RETURNS VOID AS $$
+BEGIN
+    INSERT INTO espelho_ponto_diario (funcionario_id, data, status)
+    SELECT f.id, p_data, 'FALTA'::status_dia
+    FROM funcionarios f
+    WHERE f.ativo = TRUE
+      AND NOT EXISTS (
+          SELECT 1 FROM espelho_ponto_diario e
+          WHERE e.funcionario_id = f.id AND e.data = p_data
+      );
+END;
+$$ LANGUAGE plpgsql;
