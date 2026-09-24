@@ -1,47 +1,69 @@
-## 3. Modelo do Banco de Dados SQL (Supabase PostgreSQL)
+## Modelo do Banco de Dados SQL (Supabase PostgreSQL)
 
-Abaixo está o script SQL completo para ser executado diretamente no SQL Editor do Supabase. Inclui tabelas, enums, índices, triggers para automação de fechamento de falta e regras de RLS (Row Level Security).
+Abaixo está o script SQL completo para ser executado diretamente no SQL Editor do Supabase. Inclui tabelas, enums, índices, triggers para automação de tolerância de 15 minutos, controle de banco de horas com alerta em -20.00h, fechamento de falta e auditoria imutável (Audit Trail).
 
 ```sql
 -- Habilitar extensão para geração de UUID
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. ENUMS
-CREATE TYPE tipo_registro AS ENUM ('ENTRADA', 'SAIDA');
-CREATE TYPE metodo_autenticacao AS ENUM ('FACIAL', 'BIOMETRIA_DIGITAL', 'CRACHA_BARCODE');
-CREATE TYPE status_dia AS ENUM ('NORMAL', 'ATRASO', 'FALTA', 'FOLGA');
+DO $$ BEGIN
+    CREATE TYPE tipo_registro AS ENUM ('ENTRADA', 'SAIDA');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE metodo_autenticacao AS ENUM ('FACIAL', 'BIOMETRIA_DIGITAL', 'CRACHA_BARCODE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE status_dia AS ENUM ('NORMAL', 'ATRASO', 'FALTA', 'FOLGA', 'ALERTA_JUSTA_CAUSA');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- 2. TABELA DE FUNCIONÁRIOS
-CREATE TABLE funcionarios (
+CREATE TABLE IF NOT EXISTS funcionarios (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     matricula VARCHAR(20) UNIQUE NOT NULL,
     nome VARCHAR(100) NOT NULL,
+    cargo VARCHAR(50) NOT NULL DEFAULT 'Colaborador',
     codigo_barras_cracha VARCHAR(50) UNIQUE NOT NULL,
-    -- Vetor facial armazenado como array de floats (128 posições geradas pelo face-api.js)
     vetor_facial JSONB DEFAULT NULL,
     horario_entrada TIME NOT NULL DEFAULT '08:00:00',
     horario_saida TIME NOT NULL DEFAULT '17:00:00',
+    saldo_banco_horas NUMERIC(6,2) DEFAULT 0.00,
+    status status_dia DEFAULT 'NORMAL',
     ativo BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Garantir que colunas adicionais existam se a tabela já foi criada previamente
+ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS cargo VARCHAR(50) NOT NULL DEFAULT 'Colaborador';
+ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS saldo_banco_horas NUMERIC(6,2) DEFAULT 0.00;
+ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS status status_dia DEFAULT 'NORMAL';
+
 -- 3. TABELA DE REGISTROS DE PONTO (LOGS DE ENTRADA/SAIDA)
-CREATE TABLE registros_ponto (
+CREATE TABLE IF NOT EXISTS registros_ponto (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     funcionario_id UUID NOT NULL REFERENCES funcionarios(id) ON DELETE RESTRICT,
     data_hora TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     tipo tipo_registro NOT NULL,
     metodo metodo_autenticacao NOT NULL,
     contingencia BOOLEAN GENERATED ALWAYS AS (metodo != 'FACIAL') STORED,
+    alterado_manualmente BOOLEAN DEFAULT FALSE,
+    alterado_por_id UUID REFERENCES funcionarios(id),
+    motivo_alteracao TEXT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE registros_ponto ADD COLUMN IF NOT EXISTS alterado_manualmente BOOLEAN DEFAULT FALSE;
+ALTER TABLE registros_ponto ADD COLUMN IF NOT EXISTS alterado_por_id UUID REFERENCES funcionarios(id);
+ALTER TABLE registros_ponto ADD COLUMN IF NOT EXISTS motivo_alteracao TEXT NULL;
+
 -- Indexação para otimizar busca diária por funcionário
-CREATE INDEX idx_registros_funcionario_data ON registros_ponto (funcionario_id, data_hora);
+CREATE INDEX IF NOT EXISTS idx_registros_funcionario_data ON registros_ponto (funcionario_id, data_hora);
 
 -- 4. TABELA DE ESPELHO DE PONTO DIÁRIO (APURAÇÃO DE JORNADA)
-CREATE TABLE espelho_ponto_diario (
+CREATE TABLE IF NOT EXISTS espelho_ponto_diario (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     funcionario_id UUID NOT NULL REFERENCES funcionarios(id) ON DELETE RESTRICT,
     data DATE NOT NULL,
@@ -59,7 +81,7 @@ CREATE TABLE espelho_ponto_diario (
 
 -- 5. REGRAS DE NEGÓCIO VIA STORED PROCEDURES & TRIGGERS
 
--- Função para calcular horas e tolerâncias ao registrar o ponto de SAÍDA
+-- Função para calcular horas, tolerância de 15 minutos e banco de horas
 CREATE OR REPLACE FUNCTION processar_registro_ponto()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -70,11 +92,15 @@ DECLARE
     v_saida TIMESTAMPTZ;
     v_minutos_trabalhados INT;
     v_minutos_atraso INT := 0;
+    v_minutos_debitados INT := 0;
     v_status status_dia := 'NORMAL';
+    v_saldo_atual NUMERIC(6,2);
+    v_novo_saldo NUMERIC(6,2);
+    v_status_func status_dia;
 BEGIN
-    -- Obter horário oficial do funcionário
-    SELECT horario_entrada, horario_saida 
-    INTO v_horario_oficial_entrada, v_horario_oficial_saida
+    -- Obter horário oficial e saldo atual do funcionário
+    SELECT horario_entrada, horario_saida, saldo_banco_horas, status
+    INTO v_horario_oficial_entrada, v_horario_oficial_saida, v_saldo_atual, v_status_func
     FROM funcionarios WHERE id = NEW.funcionario_id;
 
     IF NEW.tipo = 'ENTRADA' THEN
@@ -96,19 +122,23 @@ BEGIN
             -- Minutos trabalhados no dia
             v_minutos_trabalhados := EXTRACT(EPOCH FROM (v_saida - v_entrada))/60;
 
-            -- Cálculo de Atraso na Entrada
+            -- Cálculo de Atraso na Entrada em minutos
             IF (v_entrada::TIME > v_horario_oficial_entrada) THEN
                 v_minutos_atraso := EXTRACT(EPOCH FROM (v_entrada::TIME - v_horario_oficial_entrada))/60;
             END IF;
 
-            -- Aplicação da Regra de Tolerância de 10 Minutos
-            IF v_minutos_atraso <= 10 THEN
-                v_minutos_atraso := 0;
+            -- Aplicação da Regra de Tolerância de 15 Minutos (RN01)
+            -- Até 15 minutos: 0 débito
+            -- Mais de 15 minutos: debita apenas o excedente (atraso total - 15)
+            IF v_minutos_atraso <= 15 THEN
+                v_minutos_debitados := 0;
                 v_status := 'NORMAL';
             ELSE
+                v_minutos_debitados := v_minutos_atraso - 15;
                 v_status := 'ATRASO';
             END IF;
 
+            -- Atualizar espelho de ponto
             UPDATE espelho_ponto_diario
             SET ultima_saida = v_saida,
                 minutos_trabalhados = v_minutos_trabalhados,
@@ -116,6 +146,22 @@ BEGIN
                 status = v_status,
                 updated_at = NOW()
             WHERE funcionario_id = NEW.funcionario_id AND data = v_data;
+
+            -- Atualização do Banco de Horas (em horas decimais)
+            IF v_minutos_debitados > 0 THEN
+                v_novo_saldo := COALESCE(v_saldo_atual, 0.00) - ROUND((v_minutos_debitados::NUMERIC / 60.0), 2);
+
+                -- Verificação da Regra Crítica de Justa Causa (RN02: -20.00 horas)
+                IF v_novo_saldo <= -20.00 THEN
+                    v_status_func := 'ALERTA_JUSTA_CAUSA';
+                END IF;
+
+                UPDATE funcionarios
+                SET saldo_banco_horas = v_novo_saldo,
+                    status = v_status_func,
+                    updated_at = NOW()
+                WHERE id = NEW.funcionario_id;
+            END IF;
         END IF;
     END IF;
 
@@ -123,6 +169,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_processar_ponto ON registros_ponto;
 CREATE TRIGGER trg_processar_ponto
 AFTER INSERT ON registros_ponto
 FOR EACH ROW EXECUTE FUNCTION processar_registro_ponto();

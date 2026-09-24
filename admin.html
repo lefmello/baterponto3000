@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BaterPonto3000 - Painel do Gestor & Auditoria</title>
+
+  <link rel="stylesheet" href="vendor/pico.min.css">
+  <link rel="stylesheet" href="css/custom.css">
+
+  <script src="vendor/supabase.js"></script>
+  <script src="vendor/lucide.min.js"></script>
+</head>
+<body>
+
+  <!-- Cabecalho -->
+  <header class="app-header">
+    <h1><i data-lucide="clock"></i> BaterPonto3000 - Gestão</h1>
+    <nav>
+      <a href="index.html"><i data-lucide="camera"></i> Registrar Ponto</a>
+      <a href="admin.html" class="active"><i data-lucide="user-check"></i> Painel do Gestor</a>
+    </nav>
+  </header>
+
+  <main class="container">
+
+    <!-- Filtros e Selecao de Data -->
+    <div class="card-ponto">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h2>Espelho de Ponto Diário & Banco de Horas</h2>
+          <p>Acompanhamento de jornada, alertas críticos e ajustes manuais com Audit Trail.</p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <input type="date" id="filtro-data" style="margin-bottom: 0;">
+          <button id="btn-filtrar" class="contrast" style="margin-bottom: 0;">
+            <i data-lucide="search"></i> Filtrar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Indicadores e Alertas Críticos (RN02 - Justa Causa) -->
+    <div id="painel-alertas" style="display: none; margin-bottom: 1.5rem;">
+      <article style="background-color: #fee2e2; border-left: 6px solid #dc2626; padding: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <i data-lucide="alert-octagon" style="color: #dc2626; width: 32px; height: 32px;"></i>
+          <div>
+            <strong style="color: #991b1b; font-size: 1.1rem;">ALERTA CRÍTICO DE BANCO DE HORAS (-20.00h)</strong>
+            <p id="texto-alerta" style="margin: 0; color: #7f1d1d;">Colaborador com estouro de tolerância crítica acumulada.</p>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- Tabela de Espelho de Ponto -->
+    <div class="card-ponto" style="overflow-x: auto;">
+      <h3>Apuração Diária de Colaboradores</h3>
+      <table role="grid">
+        <thead>
+          <tr>
+            <th>Colaborador</th>
+            <th>Matrícula / Cargo</th>
+            <th>Data</th>
+            <th>Entrada</th>
+            <th>Saída</th>
+            <th>Atraso Debitado</th>
+            <th>Saldo Banco de Horas</th>
+            <th>Status</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-espelho">
+          <tr>
+            <td colspan="9" style="text-align: center;">Carregando registros de ponto...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Modal / Form de Ajuste Manual (Audit Trail Imutavel) -->
+    <dialog id="modal-ajuste-manual">
+      <article>
+        <header>
+          <a href="#close" aria-label="Close" class="close" id="btn-fechar-modal"></a>
+          <h3>Ajuste Manual de Ponto (Trilha de Auditoria)</h3>
+        </header>
+        <form id="form-ajuste-manual">
+          <input type="hidden" id="ajuste-funcionario-id">
+
+          <p><strong>Colaborador:</strong> <span id="ajuste-nome-func">--</span></p>
+
+          <label for="ajuste-tipo">Tipo de Registro:</label>
+          <select id="ajuste-tipo" required>
+            <option value="ENTRADA">ENTRADA</option>
+            <option value="SAIDA">SAÍDA</option>
+          </select>
+
+          <label for="ajuste-gestor">Superior Direto Responsável (ID / Matrícula):</label>
+          <select id="ajuste-gestor" required>
+            <option value="">Selecione o Gestor...</option>
+          </select>
+
+          <label for="ajuste-motivo">Justificativa / Motivo da Alteração (Obrigatório):</label>
+          <textarea id="ajuste-motivo" rows="3" placeholder="Ex: Esquecimento de batida / falha de sistema validada pelo gestor" required></textarea>
+
+          <footer>
+            <button type="button" class="secondary" id="btn-cancelar-ajuste">Cancelar</button>
+            <button type="submit" class="contrast"><i data-lucide="save"></i> Gravar Ajuste Auditado</button>
+          </footer>
+        </form>
+      </article>
+    </dialog>
+
+  </main>
+
+  <script type="module" src="js/admin_app.js"></script>
+</body>
+</html>

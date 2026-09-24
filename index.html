@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BaterPonto3000 - Registro de Ponto</title>
+
+  <!-- Estilos Vendor Pico.css & Custom -->
+  <link rel="stylesheet" href="vendor/pico.min.css">
+  <link rel="stylesheet" href="css/custom.css">
+
+  <!-- Scripts Vendor (Face-api, Lucide, Html5-Qrcode, Supabase) -->
+  <script src="vendor/supabase.js"></script>
+  <script src="vendor/face-api.min.js"></script>
+  <script src="vendor/html5-qrcode.min.js"></script>
+  <script src="vendor/lucide.min.js"></script>
+</head>
+<body>
+
+  <!-- Cabecalho da Aplicacao -->
+  <header class="app-header">
+    <h1><i data-lucide="clock"></i> BaterPonto3000</h1>
+    <nav>
+      <a href="index.html" class="active"><i data-lucide="camera"></i> Registrar Ponto</a>
+      <a href="admin.html"><i data-lucide="user-check"></i> Painel do Gestor</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <div class="card-ponto">
+      <header style="text-align: center; margin-bottom: 1.5rem;">
+        <h2>Registro de Ponto Eletrônico</h2>
+        <p>Aproxime o rosto da câmera para identificação facial ou utilize o crachá em caso de contingência.</p>
+      </header>
+
+      <!-- Selecao de Tipo de Registro (Entrada / Saida) -->
+      <div style="display: flex; gap: 1rem; justify-content: center; margin-bottom: 1.5rem;">
+        <button id="btn-tipo-entrada" class="contrast" style="flex: 1; max-width: 200px;">
+          <i data-lucide="log-in"></i> ENTRADA
+        </button>
+        <button id="btn-tipo-saida" class="outline contrast" style="flex: 1; max-width: 200px;">
+          <i data-lucide="log-out"></i> SAÍDA
+        </button>
+      </div>
+
+      <!-- Container do Reconhecimento Facial -->
+      <div id="secao-facial">
+        <div class="camera-container">
+          <video id="video-feed" autoplay muted playsinline></video>
+          <canvas id="canvas-overlay"></canvas>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 1rem;">
+          <span id="status-facial" class="badge badge-info">
+            <i data-lucide="loader"></i> Inicializando IA Facial...
+          </span>
+          <p id="tentativas-info" style="font-size: 0.9rem; color: #64748b; margin-top: 0.5rem;">
+            Tentativa 1 de 3
+          </p>
+        </div>
+
+        <div style="text-align: center;">
+          <button id="btn-capturar-facial" disabled>
+            <i data-lucide="scan-face"></i> Validar Rosto
+          </button>
+        </div>
+      </div>
+
+      <!-- Container do Contingencia (Leitura de Cracha / QR Code) -->
+      <div id="secao-contingencia" style="display: none; border-top: 2px dashed #e2e8f0; padding-top: 1.5rem; margin-top: 1.5rem;">
+        <div style="text-align: center; margin-bottom: 1rem;">
+          <span class="badge badge-warning">
+            <i data-lucide="alert-triangle"></i> Contingência Ativada (Falha Facial)
+          </span>
+          <h3>Leitura de Crachá / Código de Barras</h3>
+        </div>
+
+        <div id="qr-reader" style="width: 100%; max-width: 400px; margin: 0 auto 1rem auto;"></div>
+
+        <form id="form-cracha-manual" style="max-width: 400px; margin: 0 auto;">
+          <label for="input-cracha">Código do Crachá / Matrícula:</label>
+          <input type="text" id="input-cracha" placeholder="Ex: CRACHA123" required>
+          <button type="submit" class="secondary">
+            <i data-lucide="credit-card"></i> Validar Crachá
+          </button>
+        </form>
+      </div>
+
+      <!-- Mensagens de Resultado -->
+      <div id="msg-resultado" style="margin-top: 1.5rem; display: none;"></div>
+    </div>
+  </main>
+
+  <!-- Ticket Termico de Comprovante (Impressao 80mm) -->
+  <div id="ticket-comprovante">
+    <header>
+      <strong>BATERPONTO3000</strong><br>
+      Comprovante de Registro de Ponto
+    </header>
+    <div class="ticket-row">
+      <span>Data/Hora:</span>
+      <strong id="ticket-datahora">--/--/---- --:--</strong>
+    </div>
+    <div class="ticket-row">
+      <span>Nome:</span>
+      <strong id="ticket-nome">------------------</strong>
+    </div>
+    <div class="ticket-row">
+      <span>Matrícula:</span>
+      <span id="ticket-matricula">------</span>
+    </div>
+    <div class="ticket-row">
+      <span>Tipo:</span>
+      <strong id="ticket-tipo">ENTRADA</strong>
+    </div>
+    <div class="ticket-row">
+      <span>Método:</span>
+      <span id="ticket-metodo">FACIAL</span>
+    </div>
+    <div class="ticket-row">
+      <span>NSR / ID:</span>
+      <span id="ticket-id" style="font-size: 10px;">----------------</span>
+    </div>
+    <footer>
+      Documento emitido nativamente<br>
+      Conserve este comprovante
+    </footer>
+  </div>
+
+  <!-- JS da Aplicacao em ES Module -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
