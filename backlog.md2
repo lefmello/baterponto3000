@@ -1,0 +1,29 @@
+# Backlog MD2 - BaterPonto3000
+
+## Especificações Funcionais e Interface
+
+### 1. Mensagem de Confirmação no Registro por Crachá
+- **[CR-01]** Quando o usuário realiza a validação do crachá na tela de contingência, o sistema grava o registro de ponto no banco de dados do Supabase.
+- **[CR-02]** Após a gravação com sucesso, o sistema exibe em destaque na tela a mensagem em cor **verde** (`badge-success` / estilo verde em CSS):
+  > **"Ponto registrado"**
+
+### 2. Exibição no Painel do Gestor (`admin.html`)
+- **[ADM-01]** Ao navegar para o "Painel do Gestor" (`admin.html`) após o registro do ponto, o sistema consulta os espelhos de ponto e registros no Supabase.
+- **[ADM-02]** A tabela de apuração do Painel do Gestor exibe claramente:
+  - **Matrícula do Colaborador**: Exibida na coluna "Matrícula / Cargo".
+  - **Data do Registro**: Exibida na coluna "Data" (formato `AAAA-MM-DD` / `DD/MM/AAAA`).
+  - **Horário de Entrada**: Exibida na coluna "Entrada" com o horário exato da batida.
+
+---
+
+## Relatório de Atividades Realizadas neste Backlog
+
+1. **Ajuste na Mensagem Visual de Sucesso:**
+   - Atualizada a função `concluirRegistro` e `exibirMensagem` em `js/app.js` para garantir a mensagem **"Ponto registrado"** formatada com a classe CSS `badge-success` (fundo verde leve e texto verde escuro).
+
+2. **Aprimoramento do Painel do Gestor (`admin.html` / `js/admin_app.js`):**
+   - Garantido que a consulta `getEspelhoPontoDiario` via Supabase traga as informações da matrícula, nome, data e horário de entrada (`primeira_entrada`).
+   - A tabela renderiza a coluna de **Matrícula / Cargo**, a coluna de **Data** e o horário de **Entrada** formatado (`HH:MM`).
+
+3. **Garantia de Persistência e Rastreabilidade:**
+   - Cada registro enviado grava no banco de dados o `funcionario_id`, `data_hora`, `tipo` (ENTRADA/SAÍDA) e `metodo` (CRACHA_BARCODE), garantindo atualização imediata do Painel do Gestor.
