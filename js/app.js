@@ -222,7 +222,7 @@ async function concluirRegistro(funcionario, metodo) {
       metodo
     });
 
-    exibirMensagem(`Ponto registrado com Sucesso! [${tipoRegistroSelecionado}] - Colaborador: ${funcionario.nome}`, 'success');
+    exibirMensagem(`Ponto registrado! [${tipoRegistroSelecionado}] - Colaborador: ${funcionario.nome}`, 'success');
 
     gerarEImprimirTicket({
       dataHora: new Date(reg.data_hora).toLocaleString('pt-BR'),

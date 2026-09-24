@@ -1,0 +1,33 @@
+# Backlog MD01 - BaterPonto3000
+
+## Especificação de Fluxo de Registro e Contingência
+
+### 1. Fluxo Principal de Reconhecimento Facial
+- **[RF-01]** Ao abrir a página inicial (`index.html`), o sistema solicita permissão e ativa a câmera nativa do navegador via WebRTC API.
+- **[RF-02]** O modelo neural local do `face-api.js` analisa o vídeo para identificar a presença de um rosto e extrair a matriz de 128 dimensões na memória RAM.
+- **[RF-03]** É realizada a comparação via Distância Euclidiana com limite de decisão inferior a 0.45.
+- **[RF-04]** Caso o reconhecimento seja bem-sucedido, o registro é salvo no Supabase e o comprovante (Ticket Térmico 80mm) é gerado para impressão.
+
+### 2. Fluxo de Falha e Contingência (Crachá)
+- **[CT-01]** Em caso de falha de leitura ou após 3 tentativas malsucedidas de identificação facial, o sistema redireciona automaticamente para o modo de contingência.
+- **[CT-02]** Na contingência, o colaborador realiza a leitura de seu crachá (via leitor de código de barras / QR Code ou digitação de código/matrícula).
+- **[CT-03]** Ao confirmar o cadastro/leitura do crachá e salvar o ponto, o sistema exibe imediatamente na tela a mensagem oficial:
+  > **"Ponto registrado"**
+
+---
+
+## Relatório de Atividades Realizadas neste Backlog
+
+1. **Abertura da Câmera do Navegador e IA Local:**
+   - Implementado em `index.html` e `js/app.js` a ativação nativa do stream de vídeo (`navigator.mediaDevices.getUserMedia`).
+   - Carregamento estático dos modelos do `face-api.js` (SSD MobileNet V1, Face Landmark 68 e Face Recognition) armazenados na pasta `/models`.
+   - Processamento de frames em RAM temporária com descarte imediato após vetorização para privacidade.
+
+2. **Fluxo de Fallback para Crachá e Mensagem de Sucesso:**
+   - Integrado o leitor `HTML5-QRCode` e formulário manual para validação de crachás cadastrados na tabela `funcionarios`.
+   - Atualizado a exibição de mensagem de confirmação para informar explicitamente **"Ponto registrado"** com a identificação e status do colaborador.
+
+3. **Integração Backend e Regras de Negócio (Supabase):**
+   - Configurado o cliente `js/supabase.js` utilizando a chave pública/anon de forma segura.
+   - Aplicação da regra de tolerância de 15 minutos (debitando apenas o tempo excedente) e saldo de Banco de Horas no Supabase via PostgreSQL Triggers.
+   - Painel do Gestor (`admin.html`) para consulta do espelho de ponto diário e ajustes manuais com Audit Trail.
